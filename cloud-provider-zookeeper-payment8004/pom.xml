@@ -25,11 +25,11 @@
             </exclusions>
         </dependency>
 
-        <!--导入本地 zookeeper 3.4.6 版本-->
+        <!--导入 zookeeper 3.4.14 版本-->
         <dependency>
             <groupId>org.apache.zookeeper</groupId>
             <artifactId>zookeeper</artifactId>
-            <version>3.4.6</version>
+            <version>3.4.14</version>
             <exclusions>
                 <exclusion>
                     <groupId>log4j</groupId>
