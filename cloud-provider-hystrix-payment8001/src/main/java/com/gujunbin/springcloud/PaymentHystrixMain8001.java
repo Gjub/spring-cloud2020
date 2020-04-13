@@ -2,6 +2,8 @@ package com.gujunbin.springcloud;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.client.circuitbreaker.EnableCircuitBreaker;
+import org.springframework.cloud.netflix.eureka.EnableEurekaClient;
 
 /**
  * @Author: GuJunBin
@@ -10,6 +12,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  */
 
 @SpringBootApplication
+@EnableEurekaClient
+// 降级激活
+@EnableCircuitBreaker
 public class PaymentHystrixMain8001 {
 
     public static void main(String[] args) {
