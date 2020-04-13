@@ -1,0 +1,17 @@
+server:
+  port: 8001
+
+# 服务名称
+spring:
+  application:
+    name: CLOUD-PROVIDER-HYSTRIX-PAYMENT
+eureka:
+  client:
+    # 入驻eureka
+    register-with-eureka: true
+    # 去获取已注册的服务，在集群的时候，每个微服务都需要设置为true，配合ribbon进行负载均衡
+    fetch-registry: true
+    # 将自己注册进的 eureka服务管理中心 的url
+    service-url:
+      defaultZone: http://eureka7001.com:7001/eureka
+      #defaultZone: http://eureka7001.com:7001/eureka,http://eureka7002.com:7002/eureka

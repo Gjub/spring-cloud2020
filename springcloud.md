@@ -499,7 +499,7 @@ consul --version
 #启动服务
 consul agent -dev
 ```
-# cloud-provider-consul-payment8006
+# cloud-provider-consul-payment8006 服务注入到consul注册中心
 ### pom.xml
 
 ```
@@ -566,8 +566,416 @@ Ribbon 是 Netflix 发布的开源项目，主要功能是提供==客户端==的
 常见的负载均衡有软件 Nginx，LVS，硬件F5 等。
 
 - 集中式B
-     - 即在服务的消费方和提供方之间使用独立的LB设施（可以是硬件，如F5，也可以是软件，如nginx）,由该设施负责把访问请求通过某种策略转发至服务的提供方
+     - 即在服务的消费方和提供方之间使用独立的LB设施（可以是硬件，如F5，也可以是软件，如Nginx）,由该设施负责把访问请求通过某种策略转发至服务的提供方
  - 进程内LB
      - 将 LB 逻辑集成到消费方，消费方从服务注册中心获知有哪些地址可用，然后自己再从这些地址中选择出一个合适的服务器。Ribbon就属于进程内 LB ，它只是一个类库，集成与消费方进程，消费方通过它来获取到服务提供方的地址。
 
 **==Ribbon 就是 负载均衡 + RestTemplate调用，最终实现RPC的远程调用。==**
+
+> 注： Eureka 内置Ribbon  无需导入依赖 
+
+#### Ribbon的负载均衡机制 IRule
+
+Ribbon 提供了几个负载均衡的组件，其目的就是让请求转给合适的服务器处理，因此，如何选择合适的服务器变成了负载均衡机制的核心，Ribbon 提供了如下负载均衡规则：
+
+- RoundRobinRule：默认规则，通过简单的轮询服务列表来选择服务器
+- RandomRule：随机选择可用服务器
+- AvailabilityFilteringRule：可用性筛选规则
+   -  忽略无法连接的服务器，默认情况下，如果3次连接失败，该服务将会被置为"短路"的状态，该状态持续30秒；如果再次连接失败，"短路"状态的持续时间将会以几何级数增加，可以通过 niws.loadbalancer.<clientName>.connectionFailureCountThreshold 属性，来配置连接失败的次数；
+    - 忽略并发过高的服务器，如果连接到该服务器的并发数过高，也会被这个规则忽略，可以通过修改 <clientName>.ribbon.ActiveConnectionsLimit 属性来设定最高并发数。
+- WeightedResponseTimeRule：为每个服务器赋予一个权重值，服务器的响应时间越长，该权重值就越少，这个规则会随机选择服务器，权重值有可能会决定服务器的选择
+- ZoneAvoidanceRule：该规则以区域、可用服务器为基础进行服务器选择，使用区域（Zone）对服务器进行分类
+- BestAvailableRule：忽略"短路"的服务器，并选择并发数较低的服务器
+- RetryRule：含有重试的选择逻辑，如果使用 RoundRobinRule 选择的服务器无法连接，那么将会重新选择服务器
+
+### Ribbon 规则替换
+
+> 这个自定义配置类不能放在 @ComponentScan 所扫描的当前包下以及子包下，否则自定义的配置类就会被所有的 Ribbon 客户端所共享，达不到特殊化定制的目的了。
+
+在启动类的同级目录下新建 myrule包 自定义 MySelfRule配置类
+
+```
+@Configuration
+public class MySelfRule {
+
+    /**
+     * 配置类完成后要在主启动类添加 @RibbonClient 使配置生效
+     * @return
+     */
+    @Bean
+    public IRule myRule(){
+        return new RandomRule(); //定义为随机
+    }
+}
+
+```
+> 注：在==主启动类添加 @RibbonClient==使配置生效
+
+
+# RestTemplate
+
+### RestTemplate调用
+```
+    /**
+     * restTemplate.getForObject
+     *      返回对象为响应体中数据转化成的对象  基本上可以理解为 Json
+     *
+     * restTemplate.getForEntity
+     *      返回对象为ResponseEntity对象，包含了响应中的一些重要信息，如：响应头、响应状态码、响应体等
+     */
+    @GetMapping("/consumer/payment/get/{id}")
+    public CommonResult<Payment> getPayment(@PathVariable("id") Long id){
+        return restTemplate.getForObject(PAYMENT_URL+"/payment/get/"+id,CommonResult.class);
+    }
+
+
+    @GetMapping("/consumer/payment/getForEntity/{id}")
+    public CommonResult<Payment> getPayment2(@PathVariable("id") Long id){
+        ResponseEntity<CommonResult> forEntity = restTemplate.getForEntity(PAYMENT_URL + "/payment/get/" + id, CommonResult.class);
+        log.info(forEntity.getStatusCode()+"\t"+forEntity.getHeaders());
+        if (forEntity.getStatusCode().is2xxSuccessful()){
+            return forEntity.getBody();
+        }else {
+            return new CommonResult<>(444,"调用失败");
+        }
+    }
+```
+
+# OpenFeign
+
+### pom.xml
+
+```
+        <!--openfeign-->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
+        </dependency>
+```
+### application.yml
+```
+server:
+  port: 80
+
+eureka:
+  client:
+    register-with-eureka: false
+    service-url:
+      defaultZone: http://eureka7001.com:7001/eureka/,http://eureka7002.com:7002/eureka
+
+#设置feign 客户端超时时间（openFeign默认支持ribbon）
+ribbon:
+  #指的是建立连接后从服务器读取到可用资源所用的时间(毫秒)
+  ReadTimeout: 5000
+  #指的是建立连接所用的时间，适用于网络状况正常的情况下，两端连接所用的时间
+  ConnectTimeout: 5000
+logging:
+  level:
+    #Feign日志 以什么级别监控哪个接口
+    com.gujunbin.springcloud.service.PaymentFeignService: debug
+```
+### SpringBoot 启动类
+
+老规矩加入新组件依赖     
+注解@EnableFeignClients启用feign客户端
+
+```
+@SpringBootApplication
+@EnableFeignClients
+public class OrderFeignMain80 {
+
+    public static void main(String[] args) {
+            SpringApplication.run(OrderFeignMain80.class,args);
+        }
+}
+```
+### FeignConfig 配置类
+
+```
+@Configuration
+public class FeignConfig {
+
+    @Bean
+    Logger.Level feignLoggerLevel(){
+        return Logger.Level.FULL;
+    }
+}
+
+```
+### OrderFeignController
+
+```
+@RestController
+public class OrderFeignController {
+
+    @Resource
+    private PaymentFeignService paymentFeignService;
+
+    @GetMapping("/consumer/payment/get/{id}")
+    public CommonResult<Payment> paymentCommonResult(@PathVariable("id") Long id){
+        CommonResult paymentById = paymentFeignService.getPaymentById(id);
+        return paymentById;
+    }
+
+    @GetMapping("/consumer/payment/feign/timeout")
+    public String paymentFeignTimeOut(){
+        //OpenFeign-Ribbon, 客户端一般默认等待1秒钟
+        return paymentFeignService.paymentFeignTimeOut();
+    }
+}
+
+```
+------------
+# Hystrix
+- Hystrix是一个用于==处理分布式系统的延迟和容错的开源库==,在分布式系统里,许多依赖不可避免的会调用失败，比如超时、异常等
+- Hystrix能够保证在一个依赖出问题的情况下，不会导致整体服务失败，避免级联故障,以提高分布式系统的弹性。
+
+“断路器”本身是一种开关装置,当某个服务单元发生故障之后，通过断路器的故障监控(类似熔断保险丝)，**向调用方返回一个符合预期的、可处理的备选响应(FallBack)** ，而不是长时间的等待或者抛出调用方无法处理的异常，这样就保证了服务调用方的线程不会被长时间、不必要地占用,从而避免了故障在分布式系统中的蔓延,乃至雪崩。
+
+1. Fallback 服务降级 ：（程序异常、超时、服务熔断触发服务降级、线程池/信号量打满） 服务器忙，请稍后再试，等友好的提示
+1. Break 服务熔断 ： 类比保险丝达到最大服务访问，直接拒绝。然后调用服务降级的方法返回友好提示
+1. FlowLimit 服务限流 : 秒杀、高并发等操作，排队一秒N个有序进入 
+-------
+# cloud-provider-hystrix-payment8001 支付端微服务降级
+### pom.xml
+
+```
+        <!--hystrix-->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-hystrix</artifactId>
+        </dependency>
+```
+### applicatiom.yml
+
+```
+server:
+  port: 8001
+
+# 服务名称
+spring:
+  application:
+    name: CLOUD-PROVIDER-HYSTRIX-PAYMENT
+eureka:
+  client:
+    # 入驻eureka
+    register-with-eureka: true
+    # 去获取已注册的服务，在集群的时候，每个微服务都需要设置为true，配合ribbon进行负载均衡
+    fetch-registry: true
+    # 将自己注册进的 eureka服务管理中心 的url
+    service-url:
+      defaultZone: http://eureka7001.com:7001/eureka
+      #defaultZone: http://eureka7001.com:7001/eureka,http://eureka7002.com:7002/eureka
+```
+### SpringBoot启动类
+
+==降级激活==
+@EnableCircuitBreaker
+
+```
+@SpringBootApplication
+@EnableEurekaClient
+// 降级激活
+@EnableCircuitBreaker
+public class PaymentHystrixMain8001 {
+
+    public static void main(String[] args) {
+            SpringApplication.run(PaymentHystrixMain8001.class,args);
+        }
+}
+
+```
+### PaymentService
+
+```
+@Service
+public class PaymentService {
+
+    /**
+     * 正常访问
+     *
+     * @param id
+     * @return java.lang.String
+     * @author GuJunBin
+     */
+    public String paymentInfo_OK(Integer id) {
+        return "线程池：" + Thread.currentThread().getName() +
+               "  paymentInfo_OK,id:  " + id + "\t" + "O(∩_∩)O哈哈~";
+    }
+
+    /**
+     * 超时访问
+     * fallbackMethod = "paymentInfo_TimeOutHandler"
+     *
+     * @param id
+     * @return java.lang.String
+     * @author GuJunBin 
+     */
+    @HystrixCommand(fallbackMethod = "paymentInfo_TimeOutHandler",commandProperties ={
+            @HystrixProperty(name ="execution.isolation.thread.timeoutInMilliseconds",value = "3000")
+    })
+    public String paymentInfo_TimeOut(Integer id) {
+
+        /**
+         * 模拟线程异常 也会跳转至 paymentInfo_TimeOutHandler兜底方法
+         * int age= 1/0;
+         */
+
+        Integer Time = 1;
+        //模拟线程耗时
+        try {
+            TimeUnit.SECONDS.sleep(Time);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        return "线程池：" + Thread.currentThread().getName() +
+               " id: " + id + "\t" + "(*^▽^*)  耗时（s）：" + Time;
+    }
+
+    public String paymentInfo_TimeOutHandler(Integer id) {
+        return "程序运行繁忙或报错,请稍后再试*****" + "当前线程: " +
+                Thread.currentThread().getName() + id + "\t " + "(꒦_꒦) )";
+    }
+}
+```
+# cloud-consumer-feign-hystrix-order80 订单端降级处理
+
+### pom.xml
+
+```
+    <!--    openfeign    -->
+    <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-starter-openfeign</artifactId>
+    </dependency>
+    <!--   hystrix     -->
+    <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-starter-netflix-hystrix</artifactId>
+    </dependency>
+```
+### application.yml
+
+```
+server:
+  port: 80
+
+
+eureka:
+  client:
+    register-with-eureka: false
+    fetch-registry: true
+    service-url:
+      defaultZone: http://eureka7001.com:7001/eureka
+
+feign:
+  hystrix:
+    enabled: true
+
+```
+### SpringBoot启动类
+
+```
+@SpringBootApplication
+@EnableFeignClients
+@EnableHystrix
+public class OrderHystrixMain80 {
+
+    public static void main(String[] args) {
+            SpringApplication.run(OrderHystrixMain80.class,args);
+        }
+}
+```
+### PaymentHystrixService 
+
+```
+@Component
+@FeignClient(value = "CLOUD-PROVIDER-HYSTRIX-PAYMENT",fallback = PaymentHystrixServiceImpl.class)
+public interface PaymentHystrixService {
+
+    @GetMapping("/payment/hystrix/ok/{id}")
+    String paymentInfo_OK(@PathVariable("id") Integer id);
+
+    @GetMapping("/payment/hystrix/timeOut/{id}")
+    public String paymentInfo_TimeOut(@PathVariable("id") Integer id);
+}
+
+```
+### OrderHystrixController
+
+ - 这种注解适用特定的方法 不然一个方法一个注解 代码膨胀
+@HystrixCommand(fallbackMethod = "paymentTimeoutHandler", commandProperties = {
+        @HystrixProperty(name = "execution.isolation.thread.timeoutInMilliseconds", value = "2000")
+})
+ - 可以采用在类上加全局默认降级注解    
+@DefaultProperties(defaultFallback = "paymentGlobalTimeoutHandler")
+
+ - 最好是采用service实现类实现     
+@FeignClient(value = "...",fallback=PaymentHystrixServiceImpl.class)
+
+   
+
+```
+@RestController
+@Slf4j
+@DefaultProperties(defaultFallback = "paymentGlobalTimeoutHandler")
+public class OrderHystrixController {
+
+    @Resource
+    private PaymentHystrixService paymentHystrixService;
+
+    @GetMapping(value = "/consumer/payment/hystrix/ok/{id}")
+    public String paymentInfo_OK(@PathVariable("id") Integer id) {
+        String result = paymentHystrixService.paymentInfo_OK(id);
+        log.info("**********Result:" + result);
+        return result;
+    }
+
+    @GetMapping("/consumer/payment/hystrix/timeOut/{id}")
+   /* @HystrixCommand(fallbackMethod = "paymentTimeoutHandler", commandProperties = {
+            @HystrixProperty(name = "execution.isolation.thread.timeoutInMilliseconds", value = "2000")
+    })*/
+    // @HystrixCommand 没有用上面特别指明 就默认全局通用的降级处理
+    @HystrixCommand
+    public String paymentTimeout(@PathVariable("id") Integer id) {
+        return paymentHystrixService.paymentInfo_TimeOut(id);
+    }
+
+    public String paymentTimeoutHandler(@PathVariable("id") Integer id) {
+        return "我是消费端的80接口，对方的支付系统繁忙，请稍后再试...┭┮﹏┭┮...";
+    }
+
+    /**
+     * 全局通用降级处理
+     * 该类加上  @DefaultProperties(defaultFallback = "paymentGlobalTimeoutHandler")
+     * 默认全局 方法上加 @HystrixCommand
+     *
+     * @return
+     */
+    public String paymentGlobalTimeoutHandler() {
+        return "Global全局降级处理，请稍后再试.../(⊙︿⊙)/";
+    }
+
+}
+
+```
+
+
+### PaymentHystrixServiceImpl 解耦实现全局降级处理
+
+```
+@Service
+public class PaymentHystrixServiceImpl implements PaymentHystrixService {
+
+    @Override
+    public String paymentInfo_OK(Integer id) {
+        return "----PaymentHystrixServiceImpl  Fall Back-paymentInfo_OK ~~~ o(╥﹏╥)o";
+    }
+
+    @Override
+    public String paymentInfo_TimeOut(Integer id) {
+        return "----PaymentHystrixServiceImpl  Fall Back-paymentInfo_TimeOut ~~~ o(╥﹏╥)o";
+    }
+}
+```
+-------------
