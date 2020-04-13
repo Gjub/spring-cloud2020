@@ -1,0 +1,22 @@
+server:
+  port: 7001
+
+eureka:
+  instance:
+    hostname: eureka7001.com
+  server:
+    # 关闭eureka的自我保护机制，默认开启为true
+    enable-self-preservation: false
+    # 过了客户端的等待时间后两秒后就关闭
+    eviction-interval-timer-in-ms: 2000
+
+  client:
+    #false表示不向注册中心注册自己
+    register-with-eureka: false
+    #false 表示自己就是注册中心，职责就是维护服务实例，并不需要去检索服务
+    fetch-registry: false
+    service-url:
+      #集群指向其他 Eureka
+      defaultZone: http://eureka7002.com:7002/eureka/
+      #单机指向自己
+      #defaultZone: http://eureka7001.com:7001/eureka/
