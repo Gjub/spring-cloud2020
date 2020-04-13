@@ -3,7 +3,6 @@ package com.gujunbin.springcloud.controller;
 import com.gujunbin.springcloud.entity.CommonResult;
 import com.gujunbin.springcloud.entity.Payment;
 import com.gujunbin.springcloud.service.PaymentFeignService;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
@@ -16,7 +15,6 @@ import javax.annotation.Resource;
  * @Description:
  */
 @RestController
-@Slf4j
 public class OrderFeignController {
 
     @Resource
