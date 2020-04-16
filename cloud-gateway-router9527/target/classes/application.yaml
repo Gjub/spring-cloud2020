@@ -33,7 +33,7 @@ spring:
 #              cmd curl http://localhost:9527/payment/lb -H "X-Request-Id:1234"
 
 #            - Method=GET
-#            - Query=username, \d+  # 要参数名username且值为正数  
+#            - Query=username, \d+  # 要参数名username且值为正数
 
 eureka:
   instance:
@@ -46,3 +46,4 @@ eureka:
       #      defaultZone: http://eureka7002.com:7002/eureka/
       #      单机版eureka
       defaultZone: http://eureka7001.com:7001/eureka/
+
