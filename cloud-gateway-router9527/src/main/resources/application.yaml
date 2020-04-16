@@ -32,8 +32,8 @@ spring:
 #              请求头需要有X-Request-Id属性名,值为整数正则表达式
 #              cmd curl http://localhost:9527/payment/lb -H "X-Request-Id:1234"
 
-            - Method=GET
-            - Query=username, \d+  # 要参数名username且值为正数  http://localhost:9527/payment/lb?username=11
+#            - Method=GET
+#            - Query=username, \d+  # 要参数名username且值为正数  http://localhost:9527/payment/lb?username=11
 
 eureka:
   instance:
