@@ -1,4 +1,4 @@
-package com.gujunbin.springboot.controller;
+package com.gujunbin.springcloud.controller;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * @Author: GuJunBin
- * @Date: 2020/4/18 21:41
+ * @Date: 2020/4/18 20:55
  * @Description:
  */
 @RestController
