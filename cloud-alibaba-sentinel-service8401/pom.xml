@@ -21,6 +21,12 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- 自定义api通用包 -->
+        <dependency>
+            <groupId>com.gujunbin.springcloud</groupId>
+            <artifactId>cloud-api-commons</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- nacos依赖的引入 -->
         <dependency>
             <groupId>com.alibaba.cloud</groupId>
