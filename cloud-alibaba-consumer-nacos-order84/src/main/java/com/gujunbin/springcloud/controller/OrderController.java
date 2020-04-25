@@ -73,7 +73,7 @@ public class OrderController {
     }
 
     @GetMapping("/consumer/paymentSQL/{id}")
-    CommonResult<Payment> paymentSQL(@PathVariable("id") Long id) {
+    public CommonResult<Payment> paymentSQL(@PathVariable("id") Long id){
         return paymentService.paymentSQL(id);
     }
 }
