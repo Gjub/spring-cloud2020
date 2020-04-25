@@ -14,14 +14,14 @@ spring:
         dashboard: localhost:8080
         #默认端口号，如果被占用则从8719依次+1 直至找到未被占用端口
         port: 8719
-#      datasource:
-#        ds1:
-#          nacos:
-#            server-addr: localhost:8848
-#            dataId: cloud-alibaba-sentinel-service
-#            groupId: DEFAULT_GROUP
-#            data-type: json
-#            rule-type: flow
+      datasource:
+        ds1:
+          nacos:
+            server-addr: localhost:8848
+            dataId: cloud-alibaba-sentinel-service
+            groupId: DEFAULT_GROUP
+            data-type: json
+            rule-type: flow
 
 #暴露所有端点
 management:
@@ -30,7 +30,7 @@ management:
       exposure:
         include: "*"
 
-# 激活sentinel对feign的支持
-#feign:
-#  sentinel:
-#    enabled: true
+#激活sentinel对Feign的支持
+feign:
+  sentinel:
+    enabled: true
