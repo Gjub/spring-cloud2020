@@ -1,5 +1,7 @@
 
-# SpringCloud
+# [项目脑图](https://www.processon.com/mindmap/5ea50552e0b34d05e1adfcfc)
+
+# [SpringCloud中文文档](https://www.springcloud.cc/)
 ## maven的聚合工程(spring-cloud2020)
 
 dependencyManagement: 提供了一种管理依赖版本号的方式。
@@ -49,6 +51,17 @@ dependencyManagement: 提供了一种管理依赖版本号的方式。
 ```
 
 ---------
+
+# SpringCloud 微服务组件    
+
+服务注册中心 | 服务调用 | 服务降级 | 服务网关 | 服务配置 | 服务总线
+---|---|---|---|---|---
+× Eureka | Ribbon | × Hystrix | × Zuul | × Config | × Bus
+ Zookeeper | LoadBalancer | Resilience4j | Zuul2 | ⭐  Nacos |  ⭐  Nacos 
+ Consul | × Feign | ⭐   Sentinel | Getway 
+⭐  Nacos |  OpenFeign  
+
+
 # Eureka
 
 Eureka是通过客户端发送心跳来维持连接的，如果过了一段时间，客户端未给出任何反应，Eureka不会 将该服务直接注销，而是会选择保留该微服务的信息。所以会给出警告，可以通过关闭自我保护机制实现消除警告（不推荐），这种机制属于微服务CAP里面的==AP==机制，保证其==高可用==。
@@ -426,11 +439,11 @@ java -version
             </exclusions>
         </dependency>
 
-        <!--导入本地 zookeeper 3.4.6 版本-->
+        <!-- 导入zookeeper 3.4.14 版本-->
         <dependency>
             <groupId>org.apache.zookeeper</groupId>
             <artifactId>zookeeper</artifactId>
-            <version>3.4.6</version>
+            <version>3.4.14</version>
             <exclusions>
                 <exclusion>
                     <groupId>log4j</groupId>
@@ -642,6 +655,10 @@ public class MySelfRule {
 ```
 
 # OpenFeign
+
+Feign是一种声明式、模板化的HTTP客户端。在Spring Cloud中使用Feign，可以做到使用HTTP请求访问远程服务，就像调用本地方法一样的，开发者完全感知不到这是在调用远程方法，更感知不到在访问HTTP请求。
+
+后面有结合Hystrix和它的fallback降级实现
 
 ### pom.xml
 
@@ -979,3 +996,795 @@ public class PaymentHystrixServiceImpl implements PaymentHystrixService {
 }
 ```
 -------------
+
+# cloud-provider-hystrix-payment8001 8001端口自测服务熔断
+### 熔断机制概述
+
+> 熔断机制是应对雪崩效应额一种微服务链路保护机制。当扇出链路的某个微服务出错不可用或者响应时间太长，会进行服务的降级，进而熔断该节点微服务的调用，快速返回错误的响应信息。当检测到该节点微服务调用响应正常后，==恢复调用链路==。
+
+#### Hystrix为我们实现了自动恢复功能。
+
+- 当断路==打开==,对主逻辑进行熔断之后，hystrix会启动一个休眠时间窗在这个时间窗内,降级逻辑为临时的主逻辑。
+- 当休眠时间窗到期，断路器将进入==半开==状态,释放一次请求到原来的主逻辑上
+    - 如果此次请求正常返回,那么断路器将继续==闭合==,主逻辑恢复。
+    - 如果这次请求依然有问题，断路器继续进入打开状态,休眠时间窗重新计时。
+
+### 断路器的三个重要参数：
+- **快照时间窗**:断路器统计一些请求和错误数据，而统计的时间范围就是快照时间窗,默认为最近的10秒。
+- **请求总数阀值**:在快照时间窗内，必须满足请求总数阀值才有资格熔断。默认为20, 意味着在10秒内,如果该hystrix命令的调用次数不足20次,即使所有的请求都超时或其他原因失败，断路器都不会打开。
+- **错误百分比阀值**:当请求总数在快照时间窗内超过了阀值，比如发生了30次调用，如果在这30次调用中，有15次发生了超时异常,也就是超过50%的错误百分比，在默认设定50%阀值情况下，这时候就会将断路器打开。
+
+### PaymentService
+  
+```
+    // 服务熔断
+    @HystrixCommand(fallbackMethod = "paymentCircuitBreakerFallback", commandProperties = {
+            @HystrixProperty(name = "circuitBreaker.enabled", value = "true"),//是否开启断路器
+            @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "10"),// 请求总数阈值
+            @HystrixProperty(name = "circuitBreaker.sleepWindowInMilliseconds", value = "10000"),//快照时间窗
+            @HystrixProperty(name = "circuitBreaker.errorThresholdPercentage", value = "50")//错误百分比阈值
+    })
+    public String paymentCircuitBreaker(@PathVariable("id") Integer id) {
+        if (id < 0) {
+            throw new RuntimeException();
+        }
+        String serialNumber = IdUtil.simpleUUID();
+        return Thread.currentThread().getName() + "\t " + "调用成功,流水号: " + serialNumber;
+    }
+
+    public String paymentCircuitBreakerFallback(@PathVariable("id") Integer id) {
+        return "id不能为负数,请稍后再试~ id: " + id;
+    }
+```
+### PaymentController
+调用服务熔断方法
+```
+    // 服务熔断
+    @GetMapping("/payment/circuit/{id}")
+    public String paymentCircuitBreaker(@PathVariable("id") Integer id) {
+        String circuitBreaker = paymentService.paymentCircuitBreaker(id);
+        log.info("******result: " + circuitBreaker);
+        return circuitBreaker;
+    }
+```
+----------
+
+# SpringCloud [Gateway](https://cloud.spring.io/spring-cloud-gateway/2.2.x/reference/html/)
+
+>  类似Nginx的网关路由代理    
+它是基于异步非阻塞模型上进行开发的
+
+##### 三大核心概念
+ - Route（路由）
+     - 路由是构建网关的基本模块，它由ID，目标URI，一系列的断言和过滤器组成，如果断言为true则匹配该路由
+ - Predicate（断言）
+     - 开发人员可以匹配HTTP请求中的所有内容（例如请求头或请求参数），如果请求与断言相匹配则进行路由
+ - Filter（过滤）
+     - 指的是Spring框架中GatewayFilter的实例，使用过滤器，可以在请求被路由前或者之后对请求进行修改
+     
+### pom.xml
+这个工程不需要web依赖 导入会报错哦
+```
+<!--gateway-->
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-gateway</artifactId>
+</dependency>
+```
+### application.yaml
+
+```
+server:
+  port: 9527
+
+spring:
+  application:
+    name: cloud-gateway
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true # 开启从注册中心动态动态创建路由的功能,利用微服务名进行路由
+      routes:
+        - id: payment_routh #payment_routh    # 路由的ID，没有固定规则但要求唯一，简易配合服务名
+          uri: lb://CLOUD-PROVIDER-SERVICE   # URI的协议为lb（LoadBalance） 表示启用 Getaway的负载均衡功能 实现动态路由
+          # uri: http://localhost:8001         # 匹配后提供服务的路由地址
+          predicates:
+            - Path=/payment/get/**          # 断言，路径相匹配的进行路由
+
+        - id: payment_routh2 #payment_routh   # 路由的ID，没有固定规则但要求唯一，简易配合服务名
+          uri: lb://CLOUD-PROVIDER-SERVICE   # URI的协议为lb 表示启用 Getaway的负载均衡功能
+          # uri: http://localhost:8001          # 匹配后提供服务的路由地址
+          predicates:
+            - Path=/payment/lb/**             # 断言，路径相匹配的进行路由
+
+#            - After=2020-04-15T11:46:19.781+08:00[Asia/Shanghai] # 当前时区之后才能访问
+#            - Between=2020-04-15T11:46:19.781+08:00[Asia/Shanghai],2020-04-15T12:46:19.781+08:00[Asia/Shanghai]
+
+#            - Cookie=username,gujunbin
+#            cmd 访问 curl http://localhost:9527/payment/lb --cookie "username=gujunbin"
+
+#            - Header=X-Request-Id, \d+
+#              请求头需要有X-Request-Id属性名,值为整数正则表达式
+#              cmd curl http://localhost:9527/payment/lb -H "X-Request-Id:1234"
+
+#            - Method=GET
+#            - Query=username, \d+  # 要参数名username且值为正数  http://localhost:9527/payment/lb?username=11
+
+eureka:
+  instance:
+    hostname: cloud-gateway-service
+  client:
+    fetch-registry: true
+    register-with-eureka: true
+    service-url:
+      #设置与Eureka Server交互的地址查询服务和注册服务都需要依赖这个地址
+      #      defaultZone: http://eureka7002.com:7002/eureka/
+      #      单机版eureka
+      defaultZone: http://eureka7001.com:7001/eureka/
+```
+### GetawayConfig 配置类实现路由转发
+
+```
+    /***
+     * 配置了 id 为 path_route_baidu 的路由规则
+     * 当访问 localhost：9527/guonei 时 会转发至下面配置的 URI
+     * 
+     * @param routeLocatorBuilder 
+     * @return org.springframework.cloud.gateway.route.RouteLocator
+     * @author GuJunBin
+     */
+    @Bean
+    public RouteLocator customRouteLocator(RouteLocatorBuilder routeLocatorBuilder) {
+        RouteLocatorBuilder.Builder routes = routeLocatorBuilder.routes();
+
+        routes.route("path_route_baidu",
+                r -> r.path("/guonei")
+                        .uri("http://news.baidu.com/guonei")).build();
+        return routes.build();
+    }
+```
+### MyGateWayFilter 自定义Filter
+
+主要实现GlobalFilter、Order两个接口
+
+```
+@Component
+@Slf4j
+@Order(0)
+public class MyGateWayFilter implements GlobalFilter {
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        log.info("********Welcome to MyGateWayFilter :" + new Date());
+        String username = exchange.getRequest().getQueryParams().getFirst("username");
+        if( null == username ){
+            log.warn("****警告：用户名为 NULL 非法用户 [○･｀Д´･ ○]");
+            exchange.getResponse().setStatusCode(HttpStatus.NOT_ACCEPTABLE);
+            return exchange.getResponse().setComplete();
+        }
+        return chain.filter(exchange);
+    }
+}
+```
+
+--------------
+
+# [SpringCloud Config](https://cloud.spring.io/spring-cloud-static/spring-cloud-config/2.2.2.RELEASE/reference/html/) 
+
+- 分布式架构面临的问题    
+> 微服务意味着要将单体应用中的业务拆分成一个个子服务,每个服务的粒度相对较小，因此系统中会出现大量的服务。于每个服务都需要必要的配置信息才能运行，所以一套==集中式的、动态的配置管理==设施是必不可少的。
+
+## springcloud-config 
+
+1. 在 GitHub 新建 springcloud-config 仓库
+2. 新建config-dev.yml、config-prod.yml、config-test.yml
+3. 分别设置端口为 3333、4444、5555
+4. 提交至springcloud-config master分支
+5. 修改hosts本地端口映射 127.0.0.1   config-3344.com
+
+## cloud-config-center3344 服务端中心配置
+
+### pom.xml
+
+```
+    <!-- server 服务端配置 -->
+    <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-config-server</artifactId>
+    </dependency>
+```
+### application.yml
+
+```
+server:
+  port: 3344
+
+spring:
+  application:
+    name: cloud-config-center
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/Gjub/springcloud-config.git # git仓库名字
+          # 搜索目录
+          search-paths:
+            - springcloud-config
+      # 读取分支
+      label: master
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:7001/eureka # 注册进eureka
+```
+###  ConfigCenterMain3344 启动类
+
+激活启动后 可以访问 http://config-3344.com:3344/master/config-dev.yml 查看文件
+```
+@SpringBootApplication
+// 激活配置中心
+@EnableConfigServer
+public class ConfigCenterMain3344 {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ConfigCenterMain3344.class, args);
+    }
+}
+```
+
+## cloud-config-client3355 客户端配置
+### pom.yml
+```
+<!-- 客户端配置 -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-config</artifactId>
+        </dependency>
+```
+### bootstrap.yml
+- applicaiton. yml 是用户级的资源配置项
+- bootstrap. yml 是系统级的，优先级更加高    
+==也就是说bootstrap. yml是先于applicaiton. yml加载的==
+```
+server:
+  port: 3355
+
+spring:
+  application:
+    name: config-client
+  cloud:
+    #Config客户端配置  http://config-3344.com:3344/master/config-dev.yml
+    config:
+      label: master #分支名称
+      name: config #配置文件名称
+      profile: dev #读取后缀名称 上述3个综合：master分支上config-dev.yml的配置文件被读取
+      uri: http://localhost:3344 #配置中心地址 表示通过这个服务端访问
+
+#服务注册到eureka地址
+eureka:
+  client:
+    register-with-eureka: true
+    service-url:
+      defaultZone: http://localhost:7001/eureka
+```
+### ConfigCenterMain3355 启动类
+
+```
+@SpringBootApplication
+@EnableEurekaClient
+public class ConfigCenterMain3355 {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ConfigCenterMain3355.class, args);
+    }
+}
+```
+### ConfigClientController 客户端接口
+
+```
+@RestController
+public class ConfigClientController {
+
+    @Value("${server.port}")
+    private String serverPort;  //访问并获取3344上的信息 即更改端口号
+
+    @GetMapping("/serverPort")	//请求地址
+    public String getServerPort(){
+        return serverPort;
+    }
+}
+
+```
+
+## Config客户端动态刷新
+
+1. 在GitHub 对配置文件进行修改
+2. 刷新3344，发现ConfigServer会立刻响应
+3. 刷新3355，发现ConfigClient没有响应  需要重新加载
+
+## 修改3355模块
+
+### pom引入actuator监控
+```
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+```
+### yml 新增配置
+
+```
+#暴露监控端点
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+```
+### controller层新增一个注解 @RefreshScope
+
+@RefreshScope 实现自动刷新
+
+```
+@RestController
+@RefreshScope
+public class ConfigClientController {
+    .......
+}
+```
+### 发送Post请求刷新3355
+cmd 发送 
+```
+curl -X POST "http://localhost:3355/actuator/refresh"
+```
+---------
+# [SpringCloud Stream](https://spring.io/projects/spring-cloud-stream#overview)
+
+作用：屏蔽底层消息中间件的差异，统一消息的编程模型
+
+## cloud-stream-rabbitMQ-provider8801 供应商-发送消息
+### pom.xml
+
+```
+    <!-- rabbitMq的依赖 -->
+    <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-starter-stream-rabbit</artifactId>
+    </dependency>
+```
+### application.yml
+
+```
+server:
+  port: 8801
+
+spring:
+  application:
+    name: cloud-stream-provider
+
+  cloud:
+    stream:
+      binders: #在此处配置要绑定的rabbitmq的服务信息
+        defaultRabbit: #表示定义的命名，用于binding整合
+          type: rabbit #消息组件类型
+          environment: #设置rabbitmq的相关环境配置
+            spring:
+              rabbitmq:
+                host: 192.168.78.128
+                port: 5672
+                username: guest
+                password: guest
+      bindings: #服务的整合处理
+        output: #这个名字是一个通道的名称
+          destination: studyExchange #表示要使用的Exchange名称定义
+          content-type: application/json #设置消息类型，本次为json，文本则为 text/plain
+          binder: defaultRabbit #设置要绑定的消息服务的具体设置
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka7001.com:7001/eureka
+  instance:
+    lease-renewal-interval-in-seconds: 2 #心跳时间间隔（默认30秒）
+    lease-expiration-duration-in-seconds: 5 #超时间隔（默认90秒）
+    instance-id: send-8801.com #在信息列表时显示主机名称
+    prefer-ip-address: true #访问路径变为ip地址
+
+# 关闭健康检查
+#management:
+#  health:
+#    rabbit:
+#      enabled: false
+
+```
+### StreamMQ8801 启动类
+
+QAQ：@EnableEurekaClient 这个注解不加也会注册进Eureka服务    
+　　　　不要问，问就是　　我也不清楚
+
+```
+@SpringBootApplication
+//@EnableEurekaClient
+public class StreamMQ8801 {
+
+    public static void main(String[] args) {
+        SpringApplication.run(StreamMQ8801.class, args);
+    }
+}
+```
+
+### ProviderMessageImpl 消息推送管道实现类
+@EnableBinding(Source.class)  绑定实现发送消息
+```
+@EnableBinding(Source.class)  //调用消息中间件的service
+public class ProviderMessageImpl implements IProviderMessage {
+
+    @Resource
+    private MessageChannel output;
+
+    @Override
+    public String send() {
+        String s = UUID.randomUUID().toString();
+        output.send(MessageBuilder.withPayload(s).build());
+        System.out.println("**** serial ****: " + s);
+        return s;
+    }
+}
+```
+
+###  SendMessageController 
+
+```
+@RestController
+public class SendMessageController {
+
+    @Resource
+    private IProviderMessage providerMessage;
+
+    @GetMapping("/send")
+    public String send(){
+        return providerMessage.send();
+    }
+}
+
+```
+
+## cloud-stream-rabbitMQ-consumer8802 客户1-接收消息
+```
+server:
+  port: 8802
+
+spring:
+  application:
+    name: cloud-stream-consumer
+
+  cloud:
+    stream:
+      binders: #在此处配置要绑定的rabbitmq的服务信息
+        defaultRabbit: #表示定义的命名，用于binding整合
+          type: rabbit #消息组件类型
+          environment: #设置rabbitmq的相关环境配置
+            spring:
+              rabbitmq:
+                host: 192.168.78.128
+                port: 5672
+                username: guest
+                password: guest
+      bindings: #服务的整合处理
+        input: #这个名字是一个通道的名称
+          destination: studyExchange #表示要使用的Exchange名称定义
+          content-type: application/json #设置消息类型，本次为json，文本则为 text/plain
+          binder: defaultRabbit #设置要绑定的消息服务的具体设置
+          group: consumerA #分组设置 还能持久化
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka7001.com:7001/eureka
+  instance:
+    lease-renewal-interval-in-seconds: 2 #心跳时间间隔（默认30秒）
+    lease-expiration-duration-in-seconds: 5 #超时间隔（默认90秒）
+    instance-id: receive-8802.com #在信息列表时显示主机名称
+    prefer-ip-address: true #访问路径变为ip地址
+
+# 关闭健康检查
+management:
+  health:
+    rabbit:
+      enabled: false
+```
+### ReceiveMessageController 接收消息
+
+```
+@Component
+@EnableBinding(Sink.class)
+public class ReceiveMessageController {
+
+    @Value("${server.port}")
+    private String serverPort;
+
+    @StreamListener(Sink.INPUT)
+    public void receiveMessage(Message<String> message) {
+        System.out.println("客户1 ：" + message.getPayload() + "\t port:" + serverPort);
+    }
+}
+
+```
+
+
+## cloud-stream-rabbitMQ-consumer8803 客户2-接收消息
+问题：加入客户2后，默认是不同分组可以完全消费，导致出现重复消费    
+方案：自定义配置同一组，只有一个能消费  同8802配置可以实现同组 （group：consumerA）
+
+-------------
+# SpringCloud Sleuth 链路跟踪
+> Spring-Cloud-Sleuth是Spring Cloud的组成部分之一，为Spring Cloud应用实现了一种分布式追踪解决方案，其兼容了Zipkin, HTrace和log-based追踪
+
+薛微了解一哈  本篇卒
+
+-------
+# [SpringCloud Alibaba](https://github.com/alibaba/spring-cloud-alibaba/blob/master/README-zh.md)  走起
+
+# Nacos 服务注册和配置中心
+> Nacos = Eureka + Config + Bus  
+ nacos/bin目录下启动shutdown.cmd    
+ 访问localhost:8848/nacos     
+ 默认账号：nacos 密码：nacos
+ 
+ ==Nacos可以在AP(高可用)和CP(强一致)之间切换，一般是AP模式==
+ 
+## cloud-alibaba-provider-payment9001
+### pom.xml
+```
+        <!-- SpringCloud alibaba nacos依赖的引入 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+```
+### application.yml
+
+```
+server:
+  port: 9001
+
+spring:
+  application:
+    name: nacos-payment-provider
+  cloud:
+    nacos:
+      discovery:
+        # 配置nacos地址
+        server-addr: localhost:8848
+
+# 暴露服务
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+```
+最终实现以接口获取服务端口号
+
+## cloud-alibaba-provider-payment9002
+参照9001新建9002 演示负载均衡
+
+## cloud-alibaba-consumer-nacos-order83
+### application.yml
+
+```
+server:
+  port: 83
+spring:
+  application:
+    name: nacos-order-consumer
+  cloud:
+    nacos:
+      discovery:
+        # 配置nacos地址
+        server-addr: localhost:8848
+# 消费者将去访问微服务的名称
+service-url:
+  nacos-user-service: http://nacos-payment-provider
+```
+Nacos 集成了Ribbon 当然能调用RestTemplate啦    
+用RestTemplate.getForObject() 访问nacos-payment-provider的端口
+
+## cloud-alibaba-config-nacos-client3377 配置中心   
+### pom.xml
+
+```
+        <!-- SpringCloud alibaba nacos依赖的引入 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+```
+### bootstrap.yaml
+
+```
+server:
+  port: 3377
+
+spring:
+  application:
+    name: nacos-config-client
+  cloud:
+    nacos:
+      discovery:
+        # 配置nacos地址
+        server-addr: localhost:8848
+      config:
+        # 配置中心的地址
+        server-addr: localhost:8848
+        # 指定读取后缀名为 yaml的配置文件
+        file-extension: yaml
+        # 分组
+        group: DEV_GROUP
+        # 命名空间
+        namespace: 98c28915-2bfb-404e-9fb9-8d40281d6608
+
+# ${prefix}-${spring.profile.active}.${file-extension}  //官网配置公式
+# ${spring.application.name}-${spring.profile.active}.${spring.cloud.nacos.config.file.extension}
+# nacos-config-client-dev.yml
+```
+### application.yaml
+
+```
+spring:
+  profiles:
+    #active: info
+    active: dev  #开发环境
+    #active: test  #测试环境
+```
+在Nacos客户端新建配置文件 用3377的接口获取info  
+访问优先级  namespace --> group --> DataID
+
+# [Sentinel](https://github.com/alibaba/Sentinel/wiki/%E4%BB%8B%E7%BB%8D)
+
+**Sentinel 以流量为切入点，从流量控制、熔断降级、系统负载保护等多个维度保护服务的稳定性。**
+
+> 下载sentinel-dashboard-1.7.0.jar    
+java -jar sentinel-dashboard-1.7.0.jar  运行jar包    
+localhost:8080  访问登录 用户密码都是 sentinel    
+阿里的Sentinel界面，功能都囊括的差不多了
+
+## cloud-alibaba-sentinel-service8401 服务流量控制、熔断降级
+
+### pom.xml
+```
+        <!-- nacos依赖的引入 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+        <!-- 用作持久化 -->
+        <dependency>
+            <groupId>com.alibaba.csp</groupId>
+            <artifactId>sentinel-datasource-nacos</artifactId>
+        </dependency>
+        <!-- sentinel引入 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+        </dependency>
+```
+### application.yaml
+
+```
+server:
+  port: 8401
+spring:
+  application:
+    name: cloud-alibaba-sentinel-service
+  cloud:
+    nacos:
+      discovery:
+        #Nacos服务注册中心地址
+        server-addr: localhost:8848
+    sentinel:
+      transport:
+        #Sentinel-dashboard地址
+        dashboard: localhost:8080
+        #默认端口号，如果被占用则从8719依次+1 直至找到未被占用端口
+        port: 8719
+
+#暴露所有端点
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+
+```
+### FlowLimitController 热点key限流
+
+```
+    /**
+     * 热点参数规则配置
+     * @SentinelResource value：资源名 blockHandler：自定义消息
+     * @param p1
+     * @param p2
+     * @return
+     */
+    @GetMapping("/testHotKey")
+    @SentinelResource(value = "testHotKey",blockHandler = "deal_testHotKey")
+    public String testHotKey(@RequestParam(value = "p1",required = false) String p1,
+                             @RequestParam(value = "p2",required = false) String p2){
+        return "-----testHotKey\t" + p1 + "===.===" + p2;
+    }
+
+    public String deal_testHotKey(String p1, String p2, BlockException blockException){
+        return "dealTestHotKey,  o(╥﹏╥)o ！！\t" + p1 + "===.===" + p2;
+    }
+```
+
+# 服务熔断功能
+### cloud-alibaba-sentinel-service8401  Sentinel规则持久化配置
+#### pom.xml
+```
+ <!-- nacos依赖的引入 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+        <!-- 用作sentinel规则持久化 -->
+        <dependency>
+            <groupId>com.alibaba.csp</groupId>
+            <artifactId>sentinel-datasource-nacos</artifactId>
+        </dependency>
+        <!-- sentinel引入 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+        </dependency>
+```
+
+#### application.yaml
+```
+spring：
+  cloud：
+    sentinel：
+      datasource:
+        ds1:
+          nacos:
+            server-addr: localhost:8848
+            dataId: cloud-alibaba-sentinel-service
+            groupId: DEFAULT_GROUP
+            data-type: json
+            rule-type: flow
+```
+
+#### Nacos客户端 新建配置 配置JSON格式内容如下：
+```
+[
+    {
+        "resource":"/byURL",   //资源名称
+        "limitApp":"default",  //来源应用
+        "grade":1,  //阈值类型：0表示线程数，1表示QPS
+        "conunt":1, //单机阈值
+        "strategy":0, //流控模式，0：直接、1：关联、2：链路
+        "controlBehavior":0, //流控效果，0：快速失败、1：Warm up、2：排队等待
+        "clusterMode":false  //是否集群
+    }
+]
+```
+
+## [Seata](http://seata.io/zh-cn/docs/user/quickstart.html) 分布式事务处理
+
+**处理过程： ==一个XID + 三组件(TC、TM、RM)模型==**
+    
+
+
+
+
+
+
+
+
+
